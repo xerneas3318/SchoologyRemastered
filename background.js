@@ -1,29 +1,40 @@
-// Prevent loops - only process each URL once per session
-let lastProcessedUrl = '';
+// Track processed files by their base ID to prevent loops
+let processedFiles = new Set();
 
 // Listen for completed requests to detect and cache files
 chrome.webRequest.onCompleted.addListener(
     async (details) => {
         const url = details.url;
         
-        // Skip if we already processed this URL (prevents loops)
-        if (url === lastProcessedUrl) {
-            return;
-        }
         
         // Only catch actual document files from Schoology CDN
         const isSchoologyFile = url.includes('files-cdn.schoology.com') && 
                                (url.includes('content-type=application') || url.includes('content-disposition=attachment'));
         
         if (isSchoologyFile) {
-            lastProcessedUrl = url;
+            // Extract base file ID (before query parameters) to prevent loops
+            const baseFileId = url.split('/').pop().split('?')[0];
+            
+            // Skip if we already processed this file ID
+            if (processedFiles.has(baseFileId)) {
+                return;
+            }
+            
+            // Mark this file ID as processed
+            processedFiles.add(baseFileId);
             
             // Extract clean filename from URL
             let fileName = url.split('/').pop().split('?')[0];
             
-            // Add .pdf extension if missing
-            if (!fileName.includes('.')) {
-                if (url.includes('.pdf') || url.includes('pdf')) {
+            // Try to extract original filename from content-disposition header
+            const contentDispositionMatch = url.match(/filename%3D%22([^%]+)/);
+            if (contentDispositionMatch) {
+                const originalFileName = decodeURIComponent(contentDispositionMatch[1]);
+                console.log('Original filename from content-disposition:', originalFileName);
+                fileName = originalFileName;
+            } else if (!fileName.includes('.')) {
+                // Only add .pdf if no extension and URL explicitly contains .pdf
+                if (url.includes('.pdf')) {
                     fileName += '.pdf';
                 }
             }
@@ -34,26 +45,7 @@ chrome.webRequest.onCompleted.addListener(
                 timestamp: Date.now()
             };
 
-            // Cache file immediately when detected
-            try {
-                const response = await fetch(details.url, {
-                    cache: 'force-cache'
-                });
-                if (response.ok) {
-                    const blob = await response.blob();
-                    // Convert blob to base64 so it can be sent through messages
-                    const arrayBuffer = await blob.arrayBuffer();
-                    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
-                    
-                    fileData.cachedBlob = base64;
-                    fileData.blobType = blob.type;
-                    console.log('File cached:', fileName, 'Size:', blob.size, 'bytes');
-                }
-            } catch (error) {
-                console.error('Error caching file:', error);
-            }
-            
-            // Send cached file data to content script
+            // Send file detection to content script for caching
             chrome.tabs.query({active: true, currentWindow: true}, (tabs) => {
                 if (tabs[0] && tabs[0].url.includes('schoology.com')) {
                     chrome.tabs.sendMessage(tabs[0].id, {
