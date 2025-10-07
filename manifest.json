@@ -1,0 +1,33 @@
+{
+    "manifest_version": 3,
+    "name": "Schoology Reworked",
+    "version": "2.0",
+    "description": "Enhanced Schoology extension with improved file handling and text extraction",
+    "permissions": [
+      "activeTab",
+      "webRequest",
+      "storage",
+      "downloads",
+      "scripting"
+    ],
+    "host_permissions": [
+      "*://*.schoology.com/*",
+      "*://files-cdn.schoology.com/*"
+    ],
+    "background": {
+      "service_worker": "background.js"
+    },
+    "content_scripts": [
+      {
+        "matches": ["*://*.schoology.com/*"],
+        "js": ["pdf.min.js", "content.js"],
+        "run_at": "document_end"
+      }
+    ],
+    "web_accessible_resources": [
+      {
+        "resources": ["pdf.worker.min.js"],
+        "matches": ["*://*.schoology.com/*"]
+      }
+    ]
+  }
