@@ -1,9 +1,16 @@
+// Use browser API for cross-browser compatibility
+const browserAPI = typeof browser !== 'undefined' ? browser : chrome;
+
+// Check if required libraries are loaded
+console.log('Tesseract available:', typeof Tesseract !== 'undefined');
+console.log('PDF.js available:', typeof pdfjsLib !== 'undefined');
+
 // PDF text extraction
 async function extractTextFromPDF(blob) {
   try {
     // Re-initialize worker path in case extension context was invalidated
     try {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('pdf.worker.min.js');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = browserAPI.runtime.getURL('pdf.worker.min.js');
     } catch (contextError) {
       console.log('Extension context invalidated, skipping PDF.js');
       return '';
@@ -27,71 +34,110 @@ async function extractTextFromPDF(blob) {
   }
 }
 
-// Convert PDF to image for OCR
-async function pdfToImage(blob) {
+// Convert PDF to images for OCR (all pages)
+async function pdfToImages(blob) {
   try {
     // Re-initialize worker path in case extension context was invalidated
     try {
-      pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('pdf.worker.min.js');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = browserAPI.runtime.getURL('pdf.worker.min.js');
     } catch (contextError) {
       console.log('Extension context invalidated, cannot convert PDF to image');
-      return null;
+      return [];
     }
     
     const arrayBuffer = await blob.arrayBuffer();
     const pdf = await pdfjsLib.getDocument(arrayBuffer).promise;
-    const page = await pdf.getPage(1); // Get first page
+    const imageBlobs = [];
     
-    const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better OCR
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
+    console.log(`Converting ${pdf.numPages} pages to images for OCR...`);
     
-    canvas.height = viewport.height;
-    canvas.width = viewport.width;
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 }); // Higher scale for better OCR
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+      
+      await page.render({
+        canvasContext: context,
+        viewport: viewport
+      }).promise;
+      
+      // Convert canvas to blob
+      const imageBlob = await new Promise(resolve => {
+        canvas.toBlob(resolve, 'image/png');
+      });
+      
+      imageBlobs.push(imageBlob);
+      console.log(`Page ${i} converted to image`);
+    }
     
-    await page.render({
-      canvasContext: context,
-      viewport: viewport
-    }).promise;
-    
-    // Convert canvas to blob
-    return new Promise(resolve => {
-      canvas.toBlob(resolve, 'image/png');
-    });
+    return imageBlobs;
   } catch (error) {
-    console.error('PDF to image conversion failed:', error);
-    return null;
+    console.error('PDF to images conversion failed:', error);
+    return [];
   }
 }
 
+// Convert PDF to image for OCR (single page - kept for backward compatibility)
+async function pdfToImage(blob) {
+  const images = await pdfToImages(blob);
+  return images.length > 0 ? images[0] : null;
+}
+
 //Schoology pisses me off since every file is a pdf
-// Tesseract OCR for images
+// Tesseract OCR for images (supports multiple pages)
 async function extractTextFromImage(blob) {
   try {
-    let imageBlob = blob;
+    console.log('Starting OCR extraction...');
+    let imageBlobs = [blob];
     
-    // If it's a PDF (which it always is), convert to image first
+    // If it's a PDF (which it always is), convert all pages to images
     if (blob.type === 'application/pdf') {
-      console.log('Converting PDF to image for OCR...');
-      imageBlob = await pdfToImage(blob);
-      if (!imageBlob) {
-        console.error('Failed to convert PDF to image');
+      console.log('Converting PDF to images for OCR...');
+      imageBlobs = await pdfToImages(blob);
+      if (!imageBlobs || imageBlobs.length === 0) {
+        console.error('Failed to convert PDF to images');
         return '';
       }
+      console.log(`PDF converted to ${imageBlobs.length} images successfully`);
     }
     
+    // Check if Tesseract is available
+    if (typeof Tesseract === 'undefined') {
+      console.error('Tesseract.js is not loaded');
+      return '';
+    }
+    
+    console.log('Creating Tesseract worker...');
     const { createWorker } = Tesseract;
     const worker = await createWorker();
     
+    console.log('Loading English language...');
     await worker.loadLanguage('eng');
     await worker.initialize('eng');
     
-    const { data: { text } } = await worker.recognize(imageBlob);
+    let fullText = '';
+    
+    // Process each page/image
+    for (let i = 0; i < imageBlobs.length; i++) {
+      console.log(`Starting OCR recognition for page ${i + 1}...`);
+      const { data: { text } } = await worker.recognize(imageBlobs[i]);
+      console.log(`OCR recognition completed for page ${i + 1}, text length:`, text.length);
+      
+      if (text.trim()) {
+        fullText += `\n--- Page ${i + 1} ---\n${text.trim()}\n`;
+      }
+    }
+    
     await worker.terminate();
     
-    return text.trim();
+    return fullText.trim();
   } catch (error) {
     console.error('OCR text extraction failed:', error);
+    console.error('Error details:', error.message, error.stack);
     return '';
   }
 }
@@ -133,7 +179,7 @@ async function extractText(blob, fileName) {
 
 // Create download and extract text buttons when file is detected and cached
 function createDownloadButton(fileData) {
-  console.log('File cached:', fileData.fileName, 'Size:', fileData.cachedBlob?.length, 'bytes');
+  console.log('Content: Creating buttons for file:', fileData.fileName, 'Size:', fileData.cachedBlob?.length, 'bytes');
   
   // Remove any existing buttons
   const existingDownloadBtn = document.getElementById('schoology-download-btn');
@@ -274,9 +320,11 @@ function createDownloadButton(fileData) {
     }
   });
   
+  console.log('Content: Appending buttons to document body');
   document.body.appendChild(downloadButton);
   document.body.appendChild(extractButton);
   document.body.appendChild(ocrButton);
+  console.log('Content: Buttons appended successfully');
 }
 
 // Cache file data
@@ -297,13 +345,17 @@ window.addEventListener('beforeunload', removeButtons);
 window.addEventListener('popstate', removeButtons);
 
 // Listen for file detection messages from background script
-chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
+browserAPI.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
+  console.log('Content: Received message:', request.type, request);
+  
   if (request.type === 'FILE_DETECTED') {
-    console.log('File detected:', request.data.url);
+    console.log('Content: File detected:', request.data.url);
+    console.log('Content: File already cached?', request.data.alreadyCached);
     
-    // Cache the file from content script (has access to cookies/context)
-    try {
-      console.log('Attempting to cache file:', request.data.fileName);
+    // Only cache the file if it hasn't been cached before
+    if (!request.data.alreadyCached) {
+      try {
+        console.log('Content: Attempting to cache file:', request.data.fileName);
       const response = await fetch(request.data.url);
       console.log('Fetch response status:', response.status, response.statusText);
       
@@ -329,13 +381,50 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
         request.data.blobType = blob.type;
         cachedFileData = request.data;
         
-        console.log('File cached successfully:', request.data.fileName, 'Size:', blob.size, 'bytes');
+        // Save cached data to storage for future use
+        try {
+          await browserAPI.storage.local.set({
+            [`cached_file_${request.data.fileId}`]: {
+              cachedBlob: base64,
+              blobType: blob.type,
+              fileName: request.data.fileName,
+              timestamp: Date.now()
+            }
+          });
+          console.log('Content: Cached data saved to storage');
+        } catch (error) {
+          console.error('Content: Error saving cached data to storage:', error);
+        }
+        
+        console.log('Content: File cached successfully:', request.data.fileName, 'Size:', blob.size, 'bytes');
         createDownloadButton(request.data);
       } else {
-        console.error('Fetch failed with status:', response.status, response.statusText);
+        console.error('Content: Fetch failed with status:', response.status, response.statusText);
       }
     } catch (error) {
-      console.error('Error caching file:', error);
+      console.error('Content: Error caching file:', error);
+    }
+    } else {
+      // File already cached, but we need to get the cached data
+      console.log('Content: File already cached, retrieving cached data for:', request.data.fileName);
+      
+      // Try to get cached data from storage
+      try {
+        const result = await browserAPI.storage.local.get([`cached_file_${request.data.fileId}`]);
+        if (result[`cached_file_${request.data.fileId}`]) {
+          const cachedData = result[`cached_file_${request.data.fileId}`];
+          request.data.cachedBlob = cachedData.cachedBlob;
+          request.data.blobType = cachedData.blobType;
+          cachedFileData = request.data;
+          console.log('Content: Retrieved cached data from storage');
+        } else {
+          console.log('Content: No cached data found in storage, showing buttons without cache');
+        }
+      } catch (error) {
+        console.error('Content: Error retrieving cached data:', error);
+      }
+      
+      createDownloadButton(request.data);
     }
   }
 });
