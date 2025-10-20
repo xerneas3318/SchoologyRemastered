@@ -1,6 +1,23 @@
 // Use browser API for cross-browser compatibility
 const browserAPI = typeof browser !== 'undefined' ? browser : chrome;
 
+// Dynamically load config.js if it exists
+function loadConfig() {
+  return new Promise((resolve) => {
+    const script = document.createElement('script');
+    script.src = browserAPI.runtime.getURL('config.js');
+    script.onload = () => {
+      console.log('Config loaded successfully');
+      resolve(true);
+    };
+    script.onerror = () => {
+      console.log('Config file not found, using defaults');
+      resolve(false);
+    };
+    document.head.appendChild(script);
+  });
+}
+
 // Check if required libraries are loaded
 console.log('Tesseract available:', typeof Tesseract !== 'undefined');
 console.log('PDF.js available:', typeof pdfjsLib !== 'undefined');
@@ -2322,7 +2339,7 @@ class VoiceCommandSystem {
       console.log('Voice: Comments being sent to API:', commentsText);
 
       // Create prompt for Gemini
-      const prompt = `You are helping a teacher write feedback to a student. The teacher has made specific comments that need to be integrated into a natural, professional feedback message.
+      const prompt = `You are helping a teacher write professional feedback to a student. The teacher has made specific comments that need to be converted into formal, academic feedback.
 
 ASSIGNMENT CONTENT:
 ${pdfText}
@@ -2331,18 +2348,17 @@ TEACHER'S COMMENTS:
 ${commentsText}
 
 INSTRUCTIONS:
-- Write the feedback in the teacher's voice, naturally integrating their specific comments
-- Do NOT quote the comments with quotation marks
-- Do NOT add your own interpretation or explanation
-- Simply rewrite the teacher's comments in a more polished, professional way
-- Keep the same meaning and tone as the original comments
-- Make it sound like natural teacher feedback
-- AVOID repetition of phrases like "I think", "overall", "good", etc.
-- Combine similar points into single, flowing sentences
-- Use varied sentence structures and transitions
-- Write as one cohesive paragraph, not separate statements
+- Convert the teacher's casual comments into formal, professional feedback
+- Write in complete, grammatically correct sentences
+- Use proper academic language and tone
+- Address the student directly but professionally
+- Convert short phrases into full, meaningful sentences
+- If comments mention formatting, grammar, or structure, provide specific guidance
+- Use transitional phrases to connect multiple points
+- End with encouragement or next steps
+- Write as a single, cohesive paragraph of professional feedback
 
-Write a professional feedback message that incorporates the teacher's specific comments in a natural, integrated way. Avoid repetition and make it flow as one cohesive message.`;
+Write professional, formal feedback that converts the teacher's comments into proper academic feedback.`;
 
       // Call Gemini API (with fallbacks)
       const summary = await this.callGeminiAPI(prompt);
@@ -2354,7 +2370,7 @@ Write a professional feedback message that incorporates the teacher's specific c
       console.error('Error generating summary:', error);
       // Even if there's an error, try to show a basic summary
       try {
-        const basicSummary = await this.generateLocalSummary(prompt);
+        const basicSummary = await this.generateLocalSummary();
         this.showSummaryDialog(basicSummary);
       } catch (fallbackError) {
         console.error('Fallback summary also failed:', fallbackError);
@@ -2524,60 +2540,73 @@ Write a professional feedback message that incorporates the teacher's specific c
     } catch (error) {
       console.log('OpenAI API failed, using local summary generator:', error);
       // Final fallback to local summary generation
-      return await this.generateLocalSummary(prompt);
+      return await this.generateLocalSummary();
     }
   }
 
-  async generateLocalSummary(prompt) {
+  async generateLocalSummary(prompt = '') {
     console.log('Voice: Generating local summary as fallback');
     
-    // Extract comments from the prompt
-    const commentsMatch = prompt.match(/TEACHER'S COMMENTS:\s*([\s\S]*?)(?=Please provide|$)/);
-    const comments = commentsMatch ? commentsMatch[1].trim() : '';
-    
-    // Extract PDF content from the prompt
-    const pdfMatch = prompt.match(/ASSIGNMENT CONTENT:\s*([\s\S]*?)(?=TEACHER'S COMMENTS:|$)/);
-    const pdfContent = pdfMatch ? pdfMatch[1].trim() : '';
+    // Get current assignment comments directly instead of parsing prompt
+    const currentAssignmentId = this.getCurrentAssignmentId();
+    const assignmentComments = this.comments.filter(comment => comment.assignmentId === currentAssignmentId);
     
     // Count comments
-    const commentLines = comments.split('\n').filter(line => line.trim().length > 0);
-    const commentCount = commentLines.length;
+    const commentCount = assignmentComments.length;
     
-    // Generate a structured summary
-    let summary = `📝 **Assignment Feedback Summary**\n\n`;
-    
-    if (commentCount > 0) {
-      summary += `**Overall Assessment:**\n`;
-      summary += `I've reviewed your assignment and provided ${commentCount} specific feedback point${commentCount > 1 ? 's' : ''}. `;
-      
-      // Analyze comment themes
-      const themes = this.analyzeCommentThemes(comments);
-      if (themes.length > 0) {
-        summary += `The main areas of focus are: ${themes.join(', ')}.\n\n`;
-      }
-      
-      summary += `**Key Points:**\n`;
-      commentLines.forEach((comment, index) => {
-        if (comment.trim()) {
-          summary += `• ${comment.trim()}\n`;
-        }
-      });
-      
-      summary += `\n**Next Steps:**\n`;
-      summary += `Please review the feedback above and make the suggested improvements. `;
-      summary += `Feel free to reach out if you have any questions about the feedback or need clarification on any points.\n\n`;
-    } else {
-      summary += `**Overall Assessment:**\n`;
-      summary += `I've reviewed your assignment thoroughly. `;
-      summary += `The work demonstrates good understanding of the material.\n\n`;
+    if (commentCount === 0) {
+      return `I have reviewed your assignment and found it to demonstrate good understanding of the material. Keep up the excellent work!`;
     }
     
-    summary += `**Assignment Details:**\n`;
-    summary += `• File: ${cachedFileData?.fileName || 'Unknown'}\n`;
-    summary += `• Comments: ${commentCount}\n`;
-    summary += `• Review Date: ${new Date().toLocaleDateString()}\n\n`;
+    // Convert comments to formal teacher feedback
+    const formalComments = assignmentComments.map(comment => {
+      const text = comment.text.toLowerCase().trim();
+      
+      // Convert common casual comments to formal feedback
+      if (text.includes('fix formatting') || text.includes('formatting')) {
+        return `Please review the formatting of your assignment to ensure it follows proper academic standards.`;
+      }
+      if (text.includes('good') || text.includes('great')) {
+        return `Your work demonstrates good understanding of the concepts.`;
+      }
+      if (text.includes('grammar') || text.includes('spelling')) {
+        return `Please review your work for grammar and spelling errors before submission.`;
+      }
+      if (text.includes('explain') || text.includes('more detail')) {
+        return `Please provide more detailed explanations to support your arguments.`;
+      }
+      if (text.includes('cite') || text.includes('source')) {
+        return `Remember to properly cite your sources and provide references.`;
+      }
+      if (text.includes('structure') || text.includes('organization')) {
+        return `Please improve the organization and structure of your response.`;
+      }
+      if (text.includes('answer') || text.includes('question')) {
+        return `Please ensure you have fully addressed all parts of the question.`;
+      }
+      
+      // If it's already a full sentence, capitalize and add period if needed
+      if (text.length > 10 && (text.includes('.') || text.includes('!') || text.includes('?'))) {
+        return comment.text.charAt(0).toUpperCase() + comment.text.slice(1);
+      }
+      
+      // Convert short phrases to full sentences
+      return `Please ${comment.text.toLowerCase()}.`;
+    });
     
-    summary += `Keep up the great work! 🎯`;
+    // Combine formal comments
+    if (commentCount === 1) {
+      return formalComments[0];
+    }
+    
+    if (commentCount === 2) {
+      return `${formalComments[0]} Additionally, ${formalComments[1].toLowerCase()}`;
+    }
+    
+    // For multiple comments, create a structured response
+    let summary = `I have reviewed your assignment and have several areas for improvement. `;
+    summary += formalComments.slice(0, -1).join(' ') + ' ';
+    summary += `Finally, ${formalComments[formalComments.length - 1].toLowerCase()}`;
     
     return summary;
   }
@@ -2805,11 +2834,18 @@ Write a professional feedback message that incorporates the teacher's specific c
 // Initialize voice command system when page loads
 let voiceSystem = null;
 
-// Wait for page to be fully loaded before initializing voice system
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    voiceSystem = new VoiceCommandSystem();
-  });
-} else {
+// Initialize the extension
+async function initializeExtension() {
+  // Load config first
+  await loadConfig();
+  
+  // Initialize voice system
   voiceSystem = new VoiceCommandSystem();
+}
+
+// Wait for page to be fully loaded before initializing
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeExtension);
+} else {
+  initializeExtension();
 }
