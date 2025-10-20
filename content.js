@@ -185,9 +185,13 @@ function createDownloadButton(fileData) {
   const existingDownloadBtn = document.getElementById('schoology-download-btn');
   const existingExtractBtn = document.getElementById('schoology-extract-btn');
   const existingOCRBtn = document.getElementById('schoology-ocr-btn');
+  const existingViewCommentsBtn = document.getElementById('schoology-view-comments-btn');
+  const existingSummarizeBtn = document.getElementById('schoology-summarize-comments-btn');
   if (existingDownloadBtn) existingDownloadBtn.remove();
   if (existingExtractBtn) existingExtractBtn.remove();
   if (existingOCRBtn) existingOCRBtn.remove();
+  if (existingViewCommentsBtn) existingViewCommentsBtn.remove();
+  if (existingSummarizeBtn) existingSummarizeBtn.remove();
   
   // Create download button
   const downloadButton = document.createElement('button');
@@ -237,6 +241,44 @@ function createDownloadButton(fileData) {
     right: 20px;
     z-index: 10000;
     background: #ff6b35;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  `;
+  
+  // Create View Comments button
+  const viewCommentsButton = document.createElement('button');
+  viewCommentsButton.id = 'schoology-view-comments-btn';
+  viewCommentsButton.textContent = '💬 View Comments';
+  viewCommentsButton.style.cssText = `
+    position: fixed;
+    bottom: 70px;
+    right: 20px;
+    z-index: 10000;
+    background: #6f42c1;
+    color: white;
+    border: none;
+    padding: 10px 15px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+  `;
+  
+  // Create Summarize Comments button
+  const summarizeCommentsButton = document.createElement('button');
+  summarizeCommentsButton.id = 'schoology-summarize-comments-btn';
+  summarizeCommentsButton.textContent = '🤖 Summarize';
+  summarizeCommentsButton.style.cssText = `
+    position: fixed;
+    bottom: 120px;
+    right: 20px;
+    z-index: 10000;
+    background: #17a2b8;
     color: white;
     border: none;
     padding: 10px 15px;
@@ -320,10 +362,32 @@ function createDownloadButton(fileData) {
     }
   });
   
+  // View Comments button click handler
+  viewCommentsButton.addEventListener('click', () => {
+    console.log('View Comments clicked');
+    if (voiceSystem) {
+      voiceSystem.showComments();
+    } else {
+      console.error('Voice system not available');
+    }
+  });
+  
+  // Summarize Comments button click handler
+  summarizeCommentsButton.addEventListener('click', () => {
+    console.log('Summarize Comments clicked');
+    if (voiceSystem) {
+      voiceSystem.summarizeComments();
+    } else {
+      console.error('Voice system not available');
+    }
+  });
+  
   console.log('Content: Appending buttons to document body');
   document.body.appendChild(downloadButton);
   document.body.appendChild(extractButton);
   document.body.appendChild(ocrButton);
+  document.body.appendChild(viewCommentsButton);
+  document.body.appendChild(summarizeCommentsButton);
   console.log('Content: Buttons appended successfully');
 }
 
@@ -335,9 +399,13 @@ function removeButtons() {
   const existingDownloadBtn = document.getElementById('schoology-download-btn');
   const existingExtractBtn = document.getElementById('schoology-extract-btn');
   const existingOCRBtn = document.getElementById('schoology-ocr-btn');
+  const existingViewCommentsBtn = document.getElementById('schoology-view-comments-btn');
+  const existingSummarizeBtn = document.getElementById('schoology-summarize-comments-btn');
   if (existingDownloadBtn) existingDownloadBtn.remove();
   if (existingExtractBtn) existingExtractBtn.remove();
   if (existingOCRBtn) existingOCRBtn.remove();
+  if (existingViewCommentsBtn) existingViewCommentsBtn.remove();
+  if (existingSummarizeBtn) existingSummarizeBtn.remove();
 }
 
 // Listen for page navigation (SPA navigation)
@@ -451,10 +519,21 @@ class VoiceCommandSystem {
     // Voice command timeout
     this.lastInterimCommand = '';
     this.commandTimeout = null;
+    
+    // Comment system
+    this.comments = [];
+    this.commentDialog = null;
+    this.commentDisplay = null;
+    this.currentCommentPosition = 0;
     this.init();
   }
 
   init() {
+    this.initializeVoiceRecognition();
+    this.createVoiceUI();
+  }
+
+  initializeVoiceRecognition() {
     // Check if speech recognition is supported
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       console.log('Speech recognition not supported in this browser');
@@ -574,13 +653,14 @@ class VoiceCommandSystem {
         this.toggleButton.style.background = '#9E9E9E';
       }
       
-      if (this.isEnabled) {
+      // Don't auto-restart if we're in comment mode
+      if (this.isEnabled && !this.isRecordingComment) {
         this.updateStatus('Voice recognition stopped - restarting...', '#FF9800');
         console.log('Voice: Attempting to restart recognition...');
         
         // Restart recognition if it was enabled
         setTimeout(() => {
-          if (this.isEnabled) {
+          if (this.isEnabled && !this.isRecordingComment) {
             console.log('Voice: Restarting recognition...');
             this.startListening();
           }
@@ -589,8 +669,6 @@ class VoiceCommandSystem {
         this.updateStatus('Voice recognition stopped', '#9E9E9E');
       }
     };
-
-    this.createVoiceUI();
   }
 
   createVoiceUI() {
@@ -656,6 +734,11 @@ class VoiceCommandSystem {
       return;
     }
 
+    if (this.isListening) {
+      console.log('Voice recognition already listening');
+      return;
+    }
+
     this.isEnabled = true;
     this.toggleButton.innerHTML = '🎤 Voice On';
     this.toggleButton.style.background = '#4CAF50';
@@ -667,18 +750,31 @@ class VoiceCommandSystem {
       console.log('Voice: Recognition start command sent');
     } catch (error) {
       console.error('Failed to start voice recognition:', error);
-      this.updateStatus('Failed to start - click to retry', '#F44336');
-      this.isEnabled = false;
-      this.toggleButton.innerHTML = '🎤 Voice Off';
-      this.toggleButton.style.background = '#9E9E9E';
       
-      // Auto-retry after a delay
-      setTimeout(() => {
-        if (!this.isEnabled) {
-          console.log('Voice: Auto-retrying recognition start...');
-          this.startListening();
-        }
-      }, 3000);
+      // If recognition is already started, wait and try again
+      if (error.name === 'InvalidStateError') {
+        console.log('Voice: Recognition already started, waiting...');
+        this.updateStatus('Voice already running', '#FF9800');
+        setTimeout(() => {
+          if (this.isEnabled && !this.isListening) {
+            console.log('Voice: Retrying recognition start after delay...');
+            this.startListening();
+          }
+        }, 3000);
+      } else {
+        this.updateStatus('Failed to start - click to retry', '#F44336');
+        this.isEnabled = false;
+        this.toggleButton.innerHTML = '🎤 Voice Off';
+        this.toggleButton.style.background = '#9E9E9E';
+        
+        // Auto-retry after a delay
+        setTimeout(() => {
+          if (!this.isEnabled) {
+            console.log('Voice: Auto-retrying recognition start...');
+            this.startListening();
+          }
+        }, 2000);
+      }
     }
   }
 
@@ -703,6 +799,15 @@ class VoiceCommandSystem {
 
   processVoiceCommand(command) {
     console.log('Processing voice command:', command);
+
+    // If we're recording a comment, only process "end comment" command
+    if (this.isRecordingComment) {
+      if (command.includes('end comment')) {
+        this.endCommentRecording();
+      }
+      // Ignore all other commands while recording
+      return;
+    }
 
     // Voice commands for adding buttons - more flexible matching
     if (command.includes('download') || command.includes('download button')) {
@@ -729,6 +834,14 @@ class VoiceCommandSystem {
       this.skipSeconds(15);
     } else if (command.includes('back 15') || command.includes('rewind 15')) {
       this.skipSeconds(-15);
+    } else if (command.includes('summarize comments') || command.includes('summarize comment')) {
+      this.summarizeComments();
+    } else if (command.includes('add comment')) {
+      this.addComment();
+    } else if (command.includes('show comments') || command.includes('view comments')) {
+      this.showComments();
+    } else if (command.includes('clear comments') || command.includes('delete comments')) {
+      this.clearComments();
     } else if (command.includes('add download button')) {
       this.addDownloadButton();
     } else if (command.includes('add extract button')) {
@@ -741,6 +854,10 @@ class VoiceCommandSystem {
       this.removeAllButtons();
     } else if (command.includes('force download') || command.includes('force add download')) {
       this.forceAddDownloadButton();
+    } else if (command.includes('debug storage') || command.includes('check storage')) {
+      this.debugStorage();
+    } else if (command.includes('reload comments') || command.includes('refresh comments')) {
+      this.forceReloadComments();
     } else if (command.includes('help') || command.includes('commands') || command.includes('what')) {
       this.showVoiceCommands();
     } else {
@@ -1361,6 +1478,1193 @@ class VoiceCommandSystem {
     this.updateStatus('Speech stopped', '#9E9E9E');
   }
 
+  addComment() {
+    console.log('Voice: Adding comment');
+    
+    // Pause speech if it's currently playing
+    if (this.isSpeaking && !this.isPaused) {
+      this.pauseSpeaking();
+    }
+    
+    // Calculate current position for the comment
+    let position = 0;
+    if (this.isSpeaking || this.isPaused) {
+      // Estimate position based on time elapsed
+      const wordsPerSecond = 2.5;
+      const estimatedWordsSpoken = Math.floor((Date.now() - this.speechStartTime) / 1000 * wordsPerSecond);
+      const words = this.currentText.split(' ');
+      position = Math.min(estimatedWordsSpoken, words.length);
+    }
+    
+    this.currentCommentPosition = position;
+    this.showCommentDialog();
+    this.updateStatus('Comment mode - say "stop comment" when done', '#2196F3');
+    
+    // Stop main voice recognition completely
+    this.stopMainVoiceRecognition();
+    
+    // Start comment-only voice recognition
+    this.startCommentOnlyRecognition();
+  }
+
+  showCommentDialog() {
+    // Remove existing dialog
+    if (this.commentDialog) {
+      this.commentDialog.remove();
+    }
+    
+    // Create voice comment dialog
+    this.commentDialog = document.createElement('div');
+    this.commentDialog.id = 'comment-dialog';
+    this.commentDialog.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10002;
+      background: white;
+      border: 2px solid #2196F3;
+      border-radius: 10px;
+      padding: 20px;
+      min-width: 500px;
+      max-width: 700px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    `;
+    
+    this.commentDialog.innerHTML = `
+      <div style="margin-bottom: 15px; font-weight: bold; color: #2196F3; font-size: 16px;">🎤 Voice Comment</div>
+      <div style="margin-bottom: 10px; color: #666; font-size: 12px;">
+        Position: Word ${this.currentCommentPosition} of ${this.currentText ? this.currentText.split(' ').length : 0}
+      </div>
+      <div id="voice-status" style="
+        margin-bottom: 15px;
+        padding: 10px;
+        background: #e8f5e8;
+        border-radius: 5px;
+        text-align: center;
+        font-weight: bold;
+        color: #2e7d32;
+      ">🎤 Recording... Say "stop comment" when finished</div>
+      <div id="voice-transcript" style="
+        width: 100%;
+        height: 250px;
+        padding: 15px;
+        border: 2px solid #4CAF50;
+        border-radius: 5px;
+        background: #f8fff8;
+        font-family: inherit;
+        font-size: 16px;
+        line-height: 1.5;
+        overflow-y: auto;
+        margin-bottom: 15px;
+        color: #333;
+      ">Your comment will appear here as you speak...</div>
+      <div style="text-align: center; color: #666; font-size: 12px;">
+        Say "stop comment" to save and close
+      </div>
+    `;
+    
+    // Initialize voice recording variables
+    this.commentRecognition = null;
+    this.commentTranscript = '';
+    this.isRecordingComment = false;
+    
+    // Add to DOM
+    document.body.appendChild(this.commentDialog);
+    console.log('Voice: Comment dialog created');
+  }
+
+  stopMainVoiceRecognition() {
+    console.log('Voice: Stopping main voice recognition');
+    
+    // Set flag to prevent auto-restart
+    this.isEnabled = false;
+    this.isListening = false;
+    
+    if (this.recognition) {
+      // Remove all event listeners to prevent conflicts
+      this.recognition.onstart = null;
+      this.recognition.onresult = null;
+      this.recognition.onerror = null;
+      this.recognition.onend = null;
+      this.recognition.stop();
+      this.recognition = null;
+    }
+    
+    // Update button state
+    if (this.toggleButton) {
+      this.toggleButton.innerHTML = '🎤 Voice Off';
+      this.toggleButton.style.background = '#9E9E9E';
+    }
+  }
+
+  startCommentOnlyRecognition() {
+    console.log('Voice: Starting comment-only recognition');
+    
+    // Check if speech recognition is supported
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      alert('Speech recognition not supported in this browser');
+      return;
+    }
+    
+    // Initialize speech recognition for comments only
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    this.commentRecognition = new SpeechRecognition();
+    
+    this.commentRecognition.continuous = true;
+    this.commentRecognition.interimResults = true;
+    this.commentRecognition.lang = 'en-US';
+    
+    // Set up event handlers
+    this.commentRecognition.onstart = () => {
+      this.isRecordingComment = true;
+      const statusElement = document.getElementById('voice-status');
+      if (statusElement) {
+        statusElement.textContent = '🎤 Recording comment... Say "stop comment" when done';
+        statusElement.style.background = '#e8f5e8';
+        statusElement.style.color = '#2e7d32';
+      }
+      console.log('Voice: Comment-only recognition started');
+    };
+    
+    this.commentRecognition.onresult = async (event) => {
+      let finalTranscript = '';
+      let interimTranscript = '';
+      
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      
+      // Check for "stop comment" command
+      const fullText = (finalTranscript + interimTranscript).toLowerCase();
+      if (fullText.includes('stop comment')) {
+        console.log('Voice: Stop comment command detected');
+        // Only process if we haven't already processed this command
+        if (this.isRecordingComment) {
+          await this.stopCommentAndSave();
+        }
+        return;
+      }
+      
+      // Add to comment transcript
+      if (finalTranscript) {
+        this.commentTranscript += finalTranscript + ' ';
+        this.updateCommentDisplay();
+      }
+      
+      if (interimTranscript) {
+        this.updateCommentDisplay(interimTranscript);
+      }
+    };
+    
+    this.commentRecognition.onerror = async (event) => {
+      console.error('Comment recognition error:', event.error);
+      const statusElement = document.getElementById('voice-status');
+      if (statusElement) {
+        statusElement.textContent = `Error: ${event.error}`;
+        statusElement.style.background = '#ffebee';
+        statusElement.style.color = '#c62828';
+      }
+      await this.stopCommentAndSave();
+    };
+    
+    this.commentRecognition.onend = () => {
+      console.log('Voice: Comment recognition ended');
+      if (this.isRecordingComment) {
+        // Auto-restart if still recording
+        setTimeout(() => {
+          if (this.isRecordingComment) {
+            this.commentRecognition.start();
+          }
+        }, 100);
+      }
+    };
+    
+    // Start recording
+    try {
+      this.commentRecognition.start();
+    } catch (error) {
+      console.error('Failed to start comment recognition:', error);
+      const statusElement = document.getElementById('voice-status');
+      if (statusElement) {
+        statusElement.textContent = 'Failed to start recording';
+        statusElement.style.background = '#ffebee';
+        statusElement.style.color = '#c62828';
+      }
+    }
+  }
+
+  stopCommentRecording() {
+    console.log('Voice: Stopping comment recording');
+    
+    this.isRecordingComment = false;
+    
+    if (this.commentRecognition) {
+      this.commentRecognition.stop();
+      this.commentRecognition = null;
+    }
+    
+    // Restart main voice recognition if it was enabled
+    if (this.isEnabled && !this.isListening) {
+      console.log('Voice: Restarting main recognition after comment recording');
+      setTimeout(() => {
+        if (this.isEnabled && !this.isListening) {
+          this.startListening();
+        }
+      }, 1000);
+    }
+    
+    if (document.getElementById('voice-status')) {
+      document.getElementById('voice-status').textContent = 'Recording stopped';
+      document.getElementById('voice-status').style.background = '#f0f0f0';
+      document.getElementById('voice-status').style.color = '#666';
+    }
+    
+    if (document.getElementById('start-recording')) {
+      document.getElementById('start-recording').style.display = 'inline-block';
+    }
+    if (document.getElementById('stop-recording')) {
+      document.getElementById('stop-recording').style.display = 'none';
+    }
+  }
+
+  async stopCommentAndSave() {
+    console.log('Voice: Stopping comment and saving');
+    
+    // Stop comment recognition
+    this.isRecordingComment = false;
+    if (this.commentRecognition) {
+      this.commentRecognition.stop();
+      this.commentRecognition = null;
+    }
+    
+    // Save comment if there's content
+    if (this.commentTranscript.trim()) {
+      await this.saveComment(this.commentTranscript);
+      this.updateStatus('Comment saved and dialog closed', '#4CAF50');
+    } else {
+      this.updateStatus('No comment to save', '#FF9800');
+    }
+    
+    // Close dialog
+    if (this.commentDialog) {
+      this.commentDialog.remove();
+      this.commentDialog = null;
+    }
+    
+    // Re-enable and create fresh main voice recognition
+    this.isEnabled = true;
+    setTimeout(() => {
+      if (this.isEnabled) {
+        this.initializeVoiceRecognition();
+        this.startListening();
+        
+        // Update button state to show voice is on
+        if (this.toggleButton) {
+          this.toggleButton.innerHTML = '🎤 Voice On';
+          this.toggleButton.style.background = '#4CAF50';
+        }
+      }
+    }, 1000);
+  }
+
+  async saveAndCloseComment() {
+    console.log('Voice: Saving and closing comment');
+    
+    if (this.commentTranscript.trim()) {
+      await this.saveComment(this.commentTranscript);
+      this.stopCommentRecording();
+      this.commentDialog.remove();
+      this.commentDialog = null;
+      this.updateStatus('Comment saved and dialog closed', '#4CAF50');
+      
+      // Restart main voice recognition
+      if (this.isEnabled && !this.isListening) {
+        setTimeout(() => {
+          if (this.isEnabled && !this.isListening) {
+            this.startListening();
+          }
+        }, 1000);
+      }
+    } else {
+      this.updateStatus('No comment to save', '#FF9800');
+    }
+  }
+
+  updateCommentDisplay(interimText = '') {
+    const transcriptElement = document.getElementById('voice-transcript');
+    if (transcriptElement) {
+      let displayText = this.commentTranscript;
+      if (interimText) {
+        displayText += '<span style="color: #999; font-style: italic;">' + interimText + '</span>';
+      }
+      transcriptElement.innerHTML = displayText;
+      
+      // Auto-scroll to bottom
+      transcriptElement.scrollTop = transcriptElement.scrollHeight;
+    }
+  }
+
+  async saveComment(text) {
+    // Get current assignment ID from URL
+    const assignmentId = this.getCurrentAssignmentId();
+    
+    const comment = {
+      id: Date.now(),
+      text: text,
+      position: this.currentCommentPosition,
+      timestamp: new Date().toLocaleString(),
+      fileName: cachedFileData ? cachedFileData.fileName : 'Unknown file',
+      assignmentId: assignmentId
+    };
+    
+    this.comments.push(comment);
+    await this.saveCommentsToStorage();
+    
+    this.updateStatus(`Comment saved at position ${this.currentCommentPosition}`, '#4CAF50');
+    console.log('Voice: Comment saved:', comment);
+  }
+
+  getCurrentAssignmentId() {
+    // Extract assignment ID from URL
+    const url = window.location.href;
+    const match = url.match(/assignment\/(\d+)/);
+    return match ? match[1] : 'unknown';
+  }
+
+  async showComments() {
+    console.log('Voice: Showing comments');
+    
+    // Remove existing display
+    if (this.commentDisplay) {
+      this.commentDisplay.remove();
+    }
+    
+    // Load comments from storage first, then show them
+    await this.loadCommentsFromStorage(() => {
+      this.displayComments();
+    });
+  }
+
+  displayComments() {
+    // Filter comments for current assignment
+    const currentAssignmentId = this.getCurrentAssignmentId();
+    console.log('Voice: Getting assignment ID from URL:', window.location.href);
+    console.log('Voice: Found assignment ID:', currentAssignmentId, 'using pattern:', /assignment\/(\d+)/);
+    console.log('Voice: Displaying comments for assignment ID:', currentAssignmentId);
+    console.log('Voice: Total comments available:', this.comments.length);
+    console.log('Voice: All comments:', this.comments);
+    
+    const assignmentComments = this.comments.filter(comment => comment.assignmentId === currentAssignmentId);
+    console.log('Voice: Filtered comments for current assignment:', assignmentComments.length);
+    
+    // Create comment display
+    this.commentDisplay = document.createElement('div');
+    this.commentDisplay.id = 'comment-display';
+    this.commentDisplay.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10002;
+      background: white;
+      border: 2px solid #4CAF50;
+      border-radius: 10px;
+      padding: 20px;
+      min-width: 500px;
+      max-width: 700px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    `;
+    
+    if (assignmentComments.length === 0) {
+      // If no assignment-specific comments, show all comments as fallback
+      const allComments = this.comments.length > 0 ? this.comments : [];
+      console.log('Voice: No assignment-specific comments found, showing all comments:', allComments.length);
+      
+      if (allComments.length === 0) {
+        this.commentDisplay.innerHTML = `
+          <div style="margin-bottom: 15px; font-weight: bold; color: #4CAF50; font-size: 16px;">💬 Comments</div>
+          <div style="margin-bottom: 10px; color: #666; font-size: 12px;">
+            Assignment ID: ${currentAssignmentId}
+          </div>
+          <div style="text-align: center; color: #666; padding: 20px;">
+            No comments for this assignment yet. Say "Add comment" to create one!
+          </div>
+          <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
+            <button id="close-comments" style="
+              padding: 8px 16px;
+              background: #9E9E9E;
+              color: white;
+              border: none;
+              border-radius: 5px;
+              cursor: pointer;
+              font-size: 14px;
+            ">Close</button>
+          </div>
+        `;
+      } else {
+        // Show all comments as fallback
+        this.displayAllComments(allComments, currentAssignmentId);
+      }
+    } else {
+      let commentsHTML = `
+        <div style="margin-bottom: 15px; font-weight: bold; color: #4CAF50; font-size: 16px;">
+          💬 Comments (${assignmentComments.length})
+        </div>
+        <div style="margin-bottom: 10px; color: #666; font-size: 12px;">
+          Assignment ID: ${currentAssignmentId}
+        </div>
+      `;
+      
+      assignmentComments.forEach((comment, index) => {
+        commentsHTML += `
+          <div style="
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 10px;
+            background: #f9f9f9;
+          ">
+            <div style="font-weight: bold; color: #333; margin-bottom: 5px;">
+              Comment ${index + 1} - Position ${comment.position}
+            </div>
+            <div style="color: #666; font-size: 12px; margin-bottom: 8px;">
+              ${comment.timestamp} • ${comment.fileName}
+            </div>
+            <div style="color: #333; line-height: 1.4;">
+              ${comment.text}
+            </div>
+            <div style="margin-top: 10px;">
+              <button onclick="voiceSystem.jumpToComment(${comment.position})" style="
+                padding: 4px 8px;
+                background: #2196F3;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 12px;
+                margin-right: 5px;
+              ">Jump to Position</button>
+              <button onclick="voiceSystem.deleteComment(${comment.id})" style="
+                padding: 4px 8px;
+                background: #F44336;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                cursor: pointer;
+                font-size: 12px;
+              ">Delete</button>
+            </div>
+          </div>
+        `;
+      });
+      
+      commentsHTML += `
+        <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 15px;">
+          <button id="clear-all-comments" style="
+            padding: 8px 16px;
+            background: #F44336;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+          ">Clear All</button>
+          <button id="close-comments" style="
+            padding: 8px 16px;
+            background: #9E9E9E;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+          ">Close</button>
+        </div>
+      `;
+      
+      this.commentDisplay.innerHTML = commentsHTML;
+    }
+    
+    // Add to DOM first
+    document.body.appendChild(this.commentDisplay);
+    
+    // Add event listeners after DOM is updated
+    setTimeout(() => {
+      const closeBtn = document.getElementById('close-comments');
+      const clearBtn = document.getElementById('clear-all-comments');
+      
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          this.commentDisplay.remove();
+          this.commentDisplay = null;
+        });
+      }
+      
+      if (clearBtn && assignmentComments.length > 0) {
+        clearBtn.addEventListener('click', () => {
+          if (confirm('Are you sure you want to delete all comments for this assignment?')) {
+            this.clearCommentsForAssignment(currentAssignmentId);
+            this.commentDisplay.remove();
+            this.commentDisplay = null;
+          }
+        });
+      }
+      
+      console.log('Voice: Comment display event listeners added');
+    }, 10);
+  }
+
+  displayAllComments(allComments, currentAssignmentId) {
+    console.log('Voice: Displaying all comments as fallback');
+    
+    let commentsHTML = `
+      <div style="margin-bottom: 15px; font-weight: bold; color: #4CAF50; font-size: 16px;">
+        💬 All Comments (${allComments.length})
+      </div>
+      <div style="margin-bottom: 10px; color: #666; font-size: 12px;">
+        Current Assignment ID: ${currentAssignmentId}
+      </div>
+      <div style="margin-bottom: 10px; color: #FF9800; font-size: 12px; font-style: italic;">
+        Showing all comments (assignment-specific filtering may not be working)
+      </div>
+    `;
+    
+    allComments.forEach((comment, index) => {
+      commentsHTML += `
+        <div style="
+          border: 1px solid #ddd;
+          border-radius: 5px;
+          padding: 15px;
+          margin-bottom: 10px;
+          background: #f9f9f9;
+        ">
+          <div style="font-weight: bold; color: #333; margin-bottom: 5px;">
+            Comment ${index + 1} - Position ${comment.position}
+          </div>
+          <div style="color: #666; font-size: 12px; margin-bottom: 8px;">
+            ${comment.timestamp} • ${comment.fileName} • Assignment: ${comment.assignmentId}
+          </div>
+          <div style="color: #333; line-height: 1.4;">
+            ${comment.text}
+          </div>
+          <div style="margin-top: 10px;">
+            <button onclick="voiceSystem.jumpToComment(${comment.position})" style="
+              padding: 4px 8px;
+              background: #2196F3;
+              color: white;
+              border: none;
+              border-radius: 3px;
+              cursor: pointer;
+              font-size: 12px;
+              margin-right: 5px;
+            ">Jump to Position</button>
+            <button onclick="voiceSystem.deleteComment(${comment.id})" style="
+              padding: 4px 8px;
+              background: #F44336;
+              color: white;
+              border: none;
+              border-radius: 3px;
+              cursor: pointer;
+              font-size: 12px;
+            ">Delete</button>
+          </div>
+        </div>
+      `;
+    });
+    
+    commentsHTML += `
+      <div style="display: flex; gap: 10px; justify-content: flex-end; margin-top: 15px;">
+        <button id="clear-all-comments" style="
+          padding: 8px 16px;
+          background: #F44336;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          cursor: pointer;
+          font-size: 14px;
+        ">Clear All</button>
+        <button id="close-comments" style="
+          padding: 8px 16px;
+          background: #9E9E9E;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          cursor: pointer;
+          font-size: 14px;
+        ">Close</button>
+      </div>
+    `;
+    
+    this.commentDisplay.innerHTML = commentsHTML;
+    
+    // Add to DOM first
+    document.body.appendChild(this.commentDisplay);
+    
+    // Add event listeners after DOM is updated
+    setTimeout(() => {
+      const closeBtn = document.getElementById('close-comments');
+      const clearBtn = document.getElementById('clear-all-comments');
+      
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          this.commentDisplay.remove();
+          this.commentDisplay = null;
+        });
+      }
+      
+      if (clearBtn && allComments.length > 0) {
+        clearBtn.addEventListener('click', () => {
+          if (confirm('Are you sure you want to delete all comments?')) {
+            this.clearComments();
+            this.commentDisplay.remove();
+            this.commentDisplay = null;
+          }
+        });
+      }
+      
+      console.log('Voice: All comments display event listeners added');
+    }, 10);
+  }
+
+  jumpToComment(position) {
+    console.log('Voice: Jumping to comment position:', position);
+    
+    if (this.currentText) {
+      // Stop current speech
+      this.synthesis.cancel();
+      
+      // Calculate text from position
+      const words = this.currentText.split(' ');
+      const remainingWords = words.slice(position);
+      const remainingText = remainingWords.join(' ');
+      
+      if (remainingText.trim()) {
+        this.currentPosition = position;
+        this.startSpeaking(remainingText);
+        this.updateStatus(`Jumped to comment position ${position}`, '#4CAF50');
+      } else {
+        this.updateStatus('No text at comment position', '#FF9800');
+      }
+    } else {
+      this.updateStatus('No text available to jump to', '#FF9800');
+    }
+  }
+
+  async deleteComment(commentId) {
+    this.comments = this.comments.filter(comment => comment.id !== commentId);
+    await this.saveCommentsToStorage();
+    await this.showComments(); // Refresh the display
+    this.updateStatus('Comment deleted', '#4CAF50');
+  }
+
+  async clearComments() {
+    this.comments = [];
+    await this.saveCommentsToStorage();
+    this.updateStatus('All comments cleared', '#4CAF50');
+    console.log('Voice: All comments cleared');
+  }
+
+  async clearCommentsForAssignment(assignmentId) {
+    this.comments = this.comments.filter(comment => comment.assignmentId !== assignmentId);
+    await this.saveCommentsToStorage();
+    this.updateStatus(`Comments cleared for assignment ${assignmentId}`, '#4CAF50');
+    console.log('Voice: Comments cleared for assignment:', assignmentId);
+  }
+
+  async summarizeComments() {
+    console.log('Voice: Summarizing comments');
+    
+    // Load comments from storage first
+    await this.loadCommentsFromStorage(() => {
+      this.performSummarization();
+    });
+  }
+
+  async performSummarization() {
+    const currentAssignmentId = this.getCurrentAssignmentId();
+    const assignmentComments = this.comments.filter(comment => comment.assignmentId === currentAssignmentId);
+    
+    if (assignmentComments.length === 0) {
+      this.updateStatus('No comments to summarize for this assignment', '#FF9800');
+      return;
+    }
+
+    this.updateStatus('Generating summary...', '#2196F3');
+
+    try {
+      // Get PDF text content
+      const pdfText = await this.getPDFText();
+      
+      // Prepare comments text
+      const commentsText = assignmentComments.map(comment => 
+        `Position ${comment.position}: ${comment.text}`
+      ).join('\n');
+      
+      console.log('Voice: Comments being sent to API:', commentsText);
+
+      // Create prompt for Gemini
+      const prompt = `You are helping a teacher write feedback to a student. The teacher has made specific comments that need to be integrated into a natural, professional feedback message.
+
+ASSIGNMENT CONTENT:
+${pdfText}
+
+TEACHER'S COMMENTS:
+${commentsText}
+
+INSTRUCTIONS:
+- Write the feedback in the teacher's voice, naturally integrating their specific comments
+- Do NOT quote the comments with quotation marks
+- Do NOT add your own interpretation or explanation
+- Simply rewrite the teacher's comments in a more polished, professional way
+- Keep the same meaning and tone as the original comments
+- Make it sound like natural teacher feedback
+- AVOID repetition of phrases like "I think", "overall", "good", etc.
+- Combine similar points into single, flowing sentences
+- Use varied sentence structures and transitions
+- Write as one cohesive paragraph, not separate statements
+
+Write a professional feedback message that incorporates the teacher's specific comments in a natural, integrated way. Avoid repetition and make it flow as one cohesive message.`;
+
+      // Call Gemini API (with fallbacks)
+      const summary = await this.callGeminiAPI(prompt);
+      
+      // Display the summary
+      this.showSummaryDialog(summary);
+      
+    } catch (error) {
+      console.error('Error generating summary:', error);
+      // Even if there's an error, try to show a basic summary
+      try {
+        const basicSummary = await this.generateLocalSummary(prompt);
+        this.showSummaryDialog(basicSummary);
+      } catch (fallbackError) {
+        console.error('Fallback summary also failed:', fallbackError);
+        this.updateStatus('Failed to generate summary', '#F44336');
+      }
+    }
+  }
+
+  async getPDFText() {
+    if (!cachedFileData || !cachedFileData.cachedBlob) {
+      throw new Error('No PDF data available');
+    }
+
+    // Convert base64 back to blob
+    const binaryString = atob(cachedFileData.cachedBlob);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+
+    try {
+      // Try PDF.js text extraction first
+      const text = await this.extractTextFromPDF(blob);
+      if (text && text.trim().length > 0) {
+        console.log('Voice: PDF text extracted successfully using PDF.js');
+        return text;
+      }
+    } catch (error) {
+      console.log('Voice: PDF.js extraction failed, trying OCR:', error);
+    }
+
+    // Fallback to OCR if PDF.js fails
+    console.log('Voice: Falling back to OCR extraction');
+    const text = await extractTextFromImage(blob);
+    return text;
+  }
+
+  async extractTextFromPDF(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = async function() {
+        try {
+          // Set up PDF.js worker
+          if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          }
+
+          const typedArray = new Uint8Array(reader.result);
+          const pdf = await pdfjsLib.getDocument(typedArray).promise;
+          let fullText = '';
+
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map(item => item.str).join(' ');
+            fullText += pageText + '\n';
+          }
+
+          resolve(fullText);
+        } catch (error) {
+          reject(error);
+        }
+      };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(blob);
+    });
+  }
+
+  async callGeminiAPI(prompt) {
+    // Try Gemini API first with correct model name
+    try {
+      const apiKey = (typeof config !== 'undefined' && config.GEMINI_API_KEY) || 'YOUR_GEMINI_API_KEY_HERE';
+      if (apiKey === 'YOUR_GEMINI_API_KEY_HERE') {
+        throw new Error('Gemini API key not configured - please set config.GEMINI_API_KEY');
+      }
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+      
+      console.log('Voice: Attempting Gemini API call with model: gemini-2.0-flash');
+
+      const requestBody = {
+        contents: [{
+          parts: [{
+            text: prompt
+          }]
+        }],
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 1024,
+        }
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Gemini API error response:', errorText);
+        throw new Error(`Gemini API error: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
+        return data.candidates[0].content.parts[0].text;
+      } else {
+        console.error('Unexpected Gemini API response structure:', data);
+        throw new Error('Unexpected response structure from Gemini API');
+      }
+    } catch (error) {
+      console.log('Gemini API failed, trying OpenAI API:', error);
+      // Fallback to OpenAI API
+      return await this.callOpenAIAPI(prompt);
+    }
+  }
+
+  async callOpenAIAPI(prompt) {
+    const apiKey = (typeof config !== 'undefined' && config.OPENAI_API_KEY) || 'YOUR_OPENAI_API_KEY_HERE';
+    if (apiKey === 'YOUR_OPENAI_API_KEY_HERE') {
+      throw new Error('OpenAI API key not configured - please set config.OPENAI_API_KEY');
+    }
+    const url = 'https://api.openai.com/v1/chat/completions';
+    
+    console.log('Voice: Attempting OpenAI API call with key:', apiKey.substring(0, 20) + '...');
+
+    const requestBody = {
+      model: 'gpt-3.5-turbo',
+      messages: [{
+        role: 'user',
+        content: prompt
+      }],
+      max_tokens: 1024,
+      temperature: 0.7
+    };
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('OpenAI API error response:', errorText);
+        throw new Error(`OpenAI API error: ${response.status} - ${errorText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.choices && data.choices[0] && data.choices[0].message) {
+        return data.choices[0].message.content;
+      } else {
+        console.error('Unexpected OpenAI API response structure:', data);
+        throw new Error('Unexpected response structure from OpenAI API');
+      }
+    } catch (error) {
+      console.log('OpenAI API failed, using local summary generator:', error);
+      // Final fallback to local summary generation
+      return await this.generateLocalSummary(prompt);
+    }
+  }
+
+  async generateLocalSummary(prompt) {
+    console.log('Voice: Generating local summary as fallback');
+    
+    // Extract comments from the prompt
+    const commentsMatch = prompt.match(/TEACHER'S COMMENTS:\s*([\s\S]*?)(?=Please provide|$)/);
+    const comments = commentsMatch ? commentsMatch[1].trim() : '';
+    
+    // Extract PDF content from the prompt
+    const pdfMatch = prompt.match(/ASSIGNMENT CONTENT:\s*([\s\S]*?)(?=TEACHER'S COMMENTS:|$)/);
+    const pdfContent = pdfMatch ? pdfMatch[1].trim() : '';
+    
+    // Count comments
+    const commentLines = comments.split('\n').filter(line => line.trim().length > 0);
+    const commentCount = commentLines.length;
+    
+    // Generate a structured summary
+    let summary = `📝 **Assignment Feedback Summary**\n\n`;
+    
+    if (commentCount > 0) {
+      summary += `**Overall Assessment:**\n`;
+      summary += `I've reviewed your assignment and provided ${commentCount} specific feedback point${commentCount > 1 ? 's' : ''}. `;
+      
+      // Analyze comment themes
+      const themes = this.analyzeCommentThemes(comments);
+      if (themes.length > 0) {
+        summary += `The main areas of focus are: ${themes.join(', ')}.\n\n`;
+      }
+      
+      summary += `**Key Points:**\n`;
+      commentLines.forEach((comment, index) => {
+        if (comment.trim()) {
+          summary += `• ${comment.trim()}\n`;
+        }
+      });
+      
+      summary += `\n**Next Steps:**\n`;
+      summary += `Please review the feedback above and make the suggested improvements. `;
+      summary += `Feel free to reach out if you have any questions about the feedback or need clarification on any points.\n\n`;
+    } else {
+      summary += `**Overall Assessment:**\n`;
+      summary += `I've reviewed your assignment thoroughly. `;
+      summary += `The work demonstrates good understanding of the material.\n\n`;
+    }
+    
+    summary += `**Assignment Details:**\n`;
+    summary += `• File: ${cachedFileData?.fileName || 'Unknown'}\n`;
+    summary += `• Comments: ${commentCount}\n`;
+    summary += `• Review Date: ${new Date().toLocaleDateString()}\n\n`;
+    
+    summary += `Keep up the great work! 🎯`;
+    
+    return summary;
+  }
+
+  analyzeCommentThemes(comments) {
+    const themes = [];
+    const lowerComments = comments.toLowerCase();
+    
+    if (lowerComments.includes('good') || lowerComments.includes('great') || lowerComments.includes('excellent')) {
+      themes.push('positive aspects');
+    }
+    if (lowerComments.includes('improve') || lowerComments.includes('better') || lowerComments.includes('suggest')) {
+      themes.push('areas for improvement');
+    }
+    if (lowerComments.includes('grammar') || lowerComments.includes('spelling') || lowerComments.includes('writing')) {
+      themes.push('writing quality');
+    }
+    if (lowerComments.includes('content') || lowerComments.includes('information') || lowerComments.includes('details')) {
+      themes.push('content accuracy');
+    }
+    if (lowerComments.includes('format') || lowerComments.includes('structure') || lowerComments.includes('organization')) {
+      themes.push('organization');
+    }
+    
+    return themes.length > 0 ? themes : ['general feedback'];
+  }
+
+  showSummaryDialog(summary) {
+    // Remove existing dialog
+    if (this.summaryDialog) {
+      this.summaryDialog.remove();
+    }
+
+    // Create summary dialog
+    this.summaryDialog = document.createElement('div');
+    this.summaryDialog.id = 'summary-dialog';
+    this.summaryDialog.style.cssText = `
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 10002;
+      background: white;
+      border: 2px solid #2196F3;
+      border-radius: 10px;
+      padding: 20px;
+      min-width: 600px;
+      max-width: 800px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    `;
+
+    this.summaryDialog.innerHTML = `
+      <div style="margin-bottom: 15px; font-weight: bold; color: #2196F3; font-size: 16px;">📝 Feedback Summary</div>
+      <div style="margin-bottom: 15px; color: #666; font-size: 12px;">
+        Generated from your comments for this assignment
+      </div>
+      <div id="summary-content" style="
+        width: 100%;
+        height: 300px;
+        padding: 15px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        background: #f9f9f9;
+        font-family: inherit;
+        font-size: 14px;
+        line-height: 1.5;
+        overflow-y: auto;
+        margin-bottom: 15px;
+        color: #333;
+        white-space: pre-wrap;
+      ">${summary}</div>
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button id="copy-summary" style="
+          padding: 8px 16px;
+          background: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          cursor: pointer;
+          font-size: 14px;
+        ">📋 Copy to Clipboard</button>
+        <button id="close-summary" style="
+          padding: 8px 16px;
+          background: #9E9E9E;
+          color: white;
+          border: none;
+          border-radius: 5px;
+          cursor: pointer;
+          font-size: 14px;
+        ">Close</button>
+      </div>
+    `;
+
+    // Add to DOM
+    document.body.appendChild(this.summaryDialog);
+
+    // Add event listeners
+    setTimeout(() => {
+      const copyBtn = document.getElementById('copy-summary');
+      const closeBtn = document.getElementById('close-summary');
+
+      if (copyBtn) {
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(summary);
+            copyBtn.textContent = '✅ Copied!';
+            copyBtn.style.background = '#28a745';
+            setTimeout(() => {
+              copyBtn.textContent = '📋 Copy to Clipboard';
+              copyBtn.style.background = '#4CAF50';
+            }, 2000);
+          } catch (error) {
+            console.error('Failed to copy:', error);
+            copyBtn.textContent = '❌ Copy Failed';
+            copyBtn.style.background = '#dc3545';
+          }
+        });
+      }
+
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          this.summaryDialog.remove();
+          this.summaryDialog = null;
+        });
+      }
+
+      console.log('Voice: Summary dialog event listeners added');
+    }, 10);
+
+    this.updateStatus('Summary generated successfully', '#4CAF50');
+  }
+
+  async saveCommentsToStorage() {
+    try {
+      await browserAPI.storage.local.set({
+        'voice_comments': this.comments
+      });
+      console.log('Voice: Comments saved to storage, count:', this.comments.length);
+    } catch (error) {
+      console.error('Voice: Error saving comments:', error);
+    }
+  }
+
+  async loadCommentsFromStorage(callback) {
+    try {
+      console.log('Voice: Loading comments from storage...');
+      const result = await browserAPI.storage.local.get(['voice_comments']);
+      console.log('Voice: Storage result:', result);
+      
+      if (result.voice_comments && Array.isArray(result.voice_comments)) {
+        this.comments = result.voice_comments;
+        console.log('Voice: Comments loaded from storage:', this.comments.length);
+        console.log('Voice: Comments data:', this.comments);
+      } else {
+        this.comments = [];
+        console.log('Voice: No comments found in storage or invalid format');
+      }
+      
+      // Call the callback after comments are loaded
+      if (callback) {
+        callback();
+      }
+    } catch (error) {
+      console.error('Voice: Error loading comments:', error);
+      this.comments = [];
+      
+      // Call the callback even if there's an error
+      if (callback) {
+        callback();
+      }
+    }
+  }
+
+  async debugStorage() {
+    console.log('Voice: Debugging storage...');
+    try {
+      const result = await browserAPI.storage.local.get(null);
+      console.log('Voice: All storage contents:', result);
+      
+      const commentsResult = await browserAPI.storage.local.get(['voice_comments']);
+      console.log('Voice: Comments storage:', commentsResult);
+      
+      this.updateStatus(`Storage debug complete - check console`, '#2196F3');
+    } catch (error) {
+      console.error('Voice: Storage debug failed:', error);
+      this.updateStatus('Storage debug failed', '#F44336');
+    }
+  }
+
+  async forceReloadComments() {
+    console.log('Voice: Force reloading comments...');
+    await this.loadCommentsFromStorage(() => {
+      console.log('Voice: Comments force reloaded, count:', this.comments.length);
+      this.updateStatus(`Comments reloaded: ${this.comments.length} found`, '#4CAF50');
+    });
+  }
+
   showVoiceCommands() {
     const commands = [
       'Voice Commands:',
@@ -1374,6 +2678,13 @@ class VoiceCommandSystem {
       '"Back" or "Rewind" - Go back 10 seconds',
       '"Skip 5" - Skip 5 seconds',
       '"Back 5" - Go back 5 seconds',
+      '"Add comment" - Start voice comment mode',
+      '"Stop comment" - Save and close comment (only works in comment mode)',
+      '"Show comments" - View all comments',
+      '"Summarize comments" - Generate AI summary for student',
+      '"Clear comments" - Delete all comments',
+      '"Debug storage" - Check storage contents',
+      '"Reload comments" - Force reload comments from storage',
       '"Add download button" - Add download button',
       '"Add extract button" - Add extract button',
       '"Add OCR button" - Add OCR button',
