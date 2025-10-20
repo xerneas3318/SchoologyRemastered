@@ -506,6 +506,13 @@ class VoiceCommandSystem {
     this.statusElement = null;
     this.toggleButton = null;
     
+    // Wake word system
+    this.isAwake = false;
+    this.wakeWord = 'hey schoology';
+    this.wakeWordTimeout = null;
+    this.commandTimeout = null;
+    this.lastInterimCommand = '';
+    
     // Text-to-Speech properties
     this.synthesis = window.speechSynthesis;
     this.currentUtterance = null;
@@ -515,10 +522,6 @@ class VoiceCommandSystem {
     this.currentPosition = 0;
     this.speechRate = 1.0;
     this.ttsControls = null;
-    
-    // Voice command timeout
-    this.lastInterimCommand = '';
-    this.commandTimeout = null;
     
     // Comment system
     this.comments = [];
@@ -552,7 +555,7 @@ class VoiceCommandSystem {
     this.recognition.onstart = () => {
       console.log('Voice recognition started');
       this.isListening = true;
-      this.updateStatus('Listening...', '#4CAF50');
+      this.updateStatus('Say "Hey Schoology" to activate', '#9E9E9E');
     };
 
     this.recognition.onresult = (event) => {
@@ -568,11 +571,48 @@ class VoiceCommandSystem {
         }
       }
 
+      const fullText = (finalTranscript + interimTranscript).toLowerCase().trim();
+      
+      // Check for wake word first
+      if (!this.isAwake && fullText.includes(this.wakeWord)) {
+        console.log('Voice: Wake word detected:', this.wakeWord);
+        this.activateWakeMode();
+        this.updateStatus('Hey Schoology! Listening for commands...', '#4CAF50');
+        
+        // Clear wake word timeout
+        if (this.wakeWordTimeout) {
+          clearTimeout(this.wakeWordTimeout);
+        }
+        
+        // Set timeout to deactivate if no command comes
+        this.wakeWordTimeout = setTimeout(() => {
+          this.deactivateWakeMode();
+        }, 10000); // 10 second timeout
+        
+        return;
+      }
+
+      // Only process commands if we're in wake mode
+      if (!this.isAwake) {
+        if (interimTranscript) {
+          this.updateStatus('Say "Hey Schoology" to activate', '#9E9E9E');
+        }
+        return;
+      }
+
       if (finalTranscript) {
         console.log('Voice command:', finalTranscript);
         this.processVoiceCommand(finalTranscript.toLowerCase().trim());
         this.updateStatus('Command processed', '#2196F3');
-        setTimeout(() => this.updateStatus('Listening...', '#4CAF50'), 1000);
+        setTimeout(() => this.updateStatus('Hey Schoology! Listening...', '#4CAF50'), 1000);
+        
+        // Clear wake word timeout since we got a command
+        if (this.wakeWordTimeout) {
+          clearTimeout(this.wakeWordTimeout);
+          this.wakeWordTimeout = setTimeout(() => {
+            this.deactivateWakeMode();
+          }, 10000); // Reset 10 second timeout
+        }
       } else if (interimTranscript) {
         this.updateStatus(`Hearing: ${interimTranscript}`, '#FF9800');
         
@@ -595,6 +635,14 @@ class VoiceCommandSystem {
             this.processVoiceCommand(this.lastInterimCommand);
             this.updateStatus('Command processed (timeout)', '#FF5722');
             this.lastInterimCommand = '';
+            
+            // Reset wake word timeout
+            if (this.wakeWordTimeout) {
+              clearTimeout(this.wakeWordTimeout);
+              this.wakeWordTimeout = setTimeout(() => {
+                this.deactivateWakeMode();
+              }, 10000);
+            }
           }
         }, 1500); // 1.5 second timeout
         
@@ -607,6 +655,14 @@ class VoiceCommandSystem {
             if (this.commandTimeout) {
               clearTimeout(this.commandTimeout);
               this.commandTimeout = null;
+            }
+            
+            // Reset wake word timeout
+            if (this.wakeWordTimeout) {
+              clearTimeout(this.wakeWordTimeout);
+              this.wakeWordTimeout = setTimeout(() => {
+                this.deactivateWakeMode();
+              }, 10000);
             }
             break;
           }
@@ -672,6 +728,20 @@ class VoiceCommandSystem {
   }
 
   createVoiceUI() {
+    // Add CSS animation for pulse effect
+    if (!document.getElementById('voice-animations')) {
+      const style = document.createElement('style');
+      style.id = 'voice-animations';
+      style.textContent = `
+        @keyframes pulse {
+          0% { transform: scale(1); }
+          50% { transform: scale(1.05); }
+          100% { transform: scale(1); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
     // Create voice toggle button
     this.toggleButton = document.createElement('button');
     this.toggleButton.id = 'voice-toggle-btn';
@@ -743,7 +813,7 @@ class VoiceCommandSystem {
     this.toggleButton.innerHTML = '🎤 Voice On';
     this.toggleButton.style.background = '#4CAF50';
     this.statusElement.style.display = 'block';
-    this.updateStatus('Starting voice recognition...', '#FF9800');
+    this.updateStatus('Say "Hey Schoology" to activate', '#9E9E9E');
 
     try {
       this.recognition.start();
@@ -795,6 +865,43 @@ class VoiceCommandSystem {
       this.statusElement.textContent = message;
       this.statusElement.style.background = color;
     }
+  }
+
+  activateWakeMode() {
+    this.isAwake = true;
+    console.log('Voice: Wake mode activated');
+    
+    // Update button appearance
+    if (this.toggleButton) {
+      this.toggleButton.innerHTML = '🎤 Hey Schoology!';
+      this.toggleButton.style.background = '#FF6B35';
+      this.toggleButton.style.animation = 'pulse 1s infinite';
+    }
+    
+    // Add pulse animation
+    if (this.toggleButton) {
+      this.toggleButton.style.animation = 'pulse 1s infinite';
+    }
+  }
+
+  deactivateWakeMode() {
+    this.isAwake = false;
+    console.log('Voice: Wake mode deactivated');
+    
+    // Update button appearance
+    if (this.toggleButton) {
+      this.toggleButton.innerHTML = '🎤 Voice On';
+      this.toggleButton.style.background = '#4CAF50';
+      this.toggleButton.style.animation = 'none';
+    }
+    
+    // Clear timeouts
+    if (this.wakeWordTimeout) {
+      clearTimeout(this.wakeWordTimeout);
+      this.wakeWordTimeout = null;
+    }
+    
+    this.updateStatus('Say "Hey Schoology" to activate', '#9E9E9E');
   }
 
   processVoiceCommand(command) {
@@ -858,6 +965,11 @@ class VoiceCommandSystem {
       this.debugStorage();
     } else if (command.includes('reload comments') || command.includes('refresh comments')) {
       this.forceReloadComments();
+    } else if (command.includes('hey schoology') || command.includes('activate') || command.includes('wake up')) {
+      this.activateWakeMode();
+      this.updateStatus('Hey Schoology! Listening for commands...', '#4CAF50');
+    } else if (command.includes('sleep') || command.includes('deactivate') || command.includes('goodbye')) {
+      this.deactivateWakeMode();
     } else if (command.includes('help') || command.includes('commands') || command.includes('what')) {
       this.showVoiceCommands();
     } else {
@@ -2668,6 +2780,8 @@ Write a professional feedback message that incorporates the teacher's specific c
   showVoiceCommands() {
     const commands = [
       'Voice Commands:',
+      'First say "Hey Schoology" to activate',
+      'Then use commands like:',
       '"Download" - Download file directly',
       '"Extract" or "Read" - Extract text & copy to clipboard',
       '"OCR" or "Scan" - OCR text & copy to clipboard',
@@ -2676,25 +2790,15 @@ Write a professional feedback message that incorporates the teacher's specific c
       '"Resume" or "Continue" - Resume speech',
       '"Skip" or "Forward" - Skip 10 seconds',
       '"Back" or "Rewind" - Go back 10 seconds',
-      '"Skip 5" - Skip 5 seconds',
-      '"Back 5" - Go back 5 seconds',
       '"Add comment" - Start voice comment mode',
-      '"Stop comment" - Save and close comment (only works in comment mode)',
       '"Show comments" - View all comments',
-      '"Summarize comments" - Generate AI summary for student',
-      '"Clear comments" - Delete all comments',
-      '"Debug storage" - Check storage contents',
-      '"Reload comments" - Force reload comments from storage',
-      '"Add download button" - Add download button',
-      '"Add extract button" - Add extract button',
-      '"Add OCR button" - Add OCR button',
-      '"All buttons" - Add all buttons',
-      '"Remove" - Remove all buttons',
+      '"Summarize comments" - Generate AI summary',
+      '"Sleep" or "Goodbye" - Deactivate wake mode',
       '"Help" - Show this help'
     ];
     
     this.updateStatus(commands.join(' | '), '#2196F3');
-    setTimeout(() => this.updateStatus('Listening...', '#4CAF50'), 5000);
+    setTimeout(() => this.updateStatus('Say "Hey Schoology" to activate', '#9E9E9E'), 5000);
   }
 }
 
